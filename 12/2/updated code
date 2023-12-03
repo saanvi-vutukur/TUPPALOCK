@@ -1,0 +1,260 @@
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#include <Time.h>
+#include <DS1307RTC.h>
+// See the following for generating UUIDs:
+// https://www.uuidgenerator.net/
+
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+
+
+#define OLED_RESET 4
+Adafruit_SSD1306 display(OLED_RESET);
+
+#define NUMFLAKES 10
+#define XPOS 0
+#define YPOS 1
+#define DELTAY 2
+
+#define LOGO16_GLCD_HEIGHT 16 
+#define LOGO16_GLCD_WIDTH  16 
+static const unsigned char PROGMEM logo16_glcd_bmp[] =
+{ B00000000, B11000000,
+  B00000001, B11000000,
+  B00000001, B11000000,
+  B00000011, B11100000,
+  B11110011, B11100000,
+  B11111110, B11111000,
+  B01111110, B11111111,
+  B00110011, B10011111,
+  B00011111, B11111100,
+  B00001101, B01110000,
+  B00011011, B10100000,
+  B00111111, B11100000,
+  B00111111, B11110000,
+  B01111100, B11110000,
+  B01110000, B01110000,
+  B00000000, B00110000 };
+
+#if (SSD1306_LCDHEIGHT != 32)
+#error("Height incorrect, please fix Adafruit_SSD1306.h!");
+#endif
+
+#include <driver/rtc_io.h>
+
+#define BUTTON_GPIO GPIO_NUM_3
+
+#define DEEP_SLEEP_EXT1
+
+void enter_sleep()
+{
+  Serial.println("Going to sleep...");
+  delay(1000);
+ #ifdef DEEP_SLEEP_EXT1
+  pinMode(BUTTON_GPIO, INPUT_PULLUP);
+  gpio_hold_en(BUTTON_GPIO);
+  esp_sleep_enable_ext1_wakeup(BUTTON_GPIO, LOW);
+ #endif
+  esp_deep_sleep_start();
+}
+
+String inputString;
+String Name;
+String Password;
+String Passwordcheck;
+String answer1;
+String answer2;
+String myString1;
+String myString2;
+
+int SolenoidPin = 10;
+int wid = 128; //for your 20x1
+int row = 0;  //always 1st row      
+int len = strlen(msg); 
+int value = 0;
+float voltage;
+float perc;
+
+class MyCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+      std::string value = pCharacteristic->getValue();
+      Serial.begin(115200);
+      pinMode (SolenoidPin, OUTPUT);
+
+      if (value.length() > 0) {
+               
+        for (int i = 0; i < value.length(); i++) { 
+          Serial.print(value[i]);
+          inputString += value[i];
+          answer1 += value[i];  
+          answer2 += value[i];  
+          Name += value[i];
+          Password += value[i];
+          Passwordcheck += value[i];
+        }
+               
+        Serial.println();
+      
+      display.setTextSize(1.8);
+      display.setTextColor(WHITE);
+      display.setCursor((20 - len) / 2, row);
+
+      if (digitalRead(SolenoidPin) == HIGH){
+        Serial.println("SolenoidPin is HIGH"); 
+        display.println ("Welcome to TUPALOCK!");
+        delay(3000);
+        display.println("Would you like to lock? (yes/no)");
+        display.display();  
+        myString1 = "yes"; 
+        if (String1.equalsIgnoreCase(answer1)) {
+          display.clearDisplay();
+          display.println("Your name(s)?");
+          display.display();
+          display.clearDisplay();
+          display.println("Please input a password.");
+          display.display();
+          if (Password.length() > 0) {
+            digitalWrite(SolenoidPin,LOW);
+            display.clearDisplay();
+            display.println("Password has been saved.");
+            display.display();
+            delay(3000); 
+            display.display(printMain); }
+        }
+        else { 
+        display.clearDisplay();
+        display.println("Thank you for using Tupperlock!")
+        delay(3000);
+        display.clearDisplay(); }
+      }
+        
+      if(digitalRead(SolenoidPin) == LOW){
+        Serial.println("SolenoidPin is LOW"); //low means racheted / pushed out 
+        display.println ("Welcome to TUPALOCK!");
+        delay(3000);
+        display.println("Would you like to unlock? (yes/no)");
+        myString2 = "yes"; 
+        if (myString2.equalsIgnoreCase(answer2)) {
+          digitalWrite(SolenoidPin,HIGH);
+          display.clearDisplay();
+          display.println("Please input password.") 
+          if (Password.equalsIgnoreCase(Password)) {
+            display.println("Unlock successful! Enjoy.");
+            display.display();
+            delay(2000); 
+            display.clearDisplay(); }
+        }
+        else { 
+          display.clearDisplay();
+          display.display(printMain);  
+          delay(10000);
+         }
+      }
+      
+    }
+  }
+}
+
+
+
+void setup()   {                
+  Serial.begin(9600);
+  pinMode(TouchPin,  INPUT);
+  pinMode(BUTTON_GPIO, INPUT_PULLUP);
+
+  // by default, we'll generate the high voltage from the 3.3v line internally! (neat!)
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3C (for the 128x32)
+  
+  setSyncProvider(RTC.get);   // the function to get the time from the RTC
+  if(timeStatus()!= timeSet) 
+     Serial.println("Unable to sync with the RTC");
+  else
+     Serial.println("RTC has set the system time");
+  
+  BLEDevice::init("TUPALOCK");
+  BLEServer *pServer = BLEDevice::createServer();
+
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+
+  BLECharacteristic *pCharacteristic = pService->createCharacteristic(
+                                         CHARACTERISTIC_UUID,
+                                         BLECharacteristic::PROPERTY_READ |
+                                         BLECharacteristic::PROPERTY_WRITE
+                                       );
+
+  pCharacteristic->setCallbacks(new MyCallbacks());
+
+  pCharacteristic->setValue("Hello World");
+  pService->start();
+
+  BLEAdvertising *pAdvertising = pServer->getAdvertising();
+  pAdvertising->start();
+}
+
+
+void digitalClockDisplay(){
+  // digital clock display of the time
+  Serial.print(hour());
+  printDigits(minute());
+  printDigits(second());
+  Serial.print(" ");
+  Serial.print(day());
+  Serial.print(" ");
+  Serial.print(month());
+  Serial.print(" ");
+  Serial.print(year()); 
+  Serial.println(); 
+}
+
+void loop () {
+  if (digitalRead(BUTTON_GPIO) == LOW)
+  {
+     Serial.println("Button pressed - enter sleep\n");  
+     enter_sleep(); }
+}
+
+void printDigits(int digits){
+  // utility function for digital clock display: prints preceding colon and leading 0
+  Serial.print(":");
+  if(digits < 10)
+    Serial.print('0');
+  Serial.print(digits);
+}
+
+void gotoSleep() {
+  esp_deep_sleep_enable_gpio_wakeup(1ULL << 3,ESP_GPIO_WAKEUP_GPIO_HIGH);  
+  Serial.println("going to sleep now"); 
+  delay(1000);
+  esp_deep_sleep_start();   
+  
+  gpio_wakeup_enable(GPIO_NUM_5, GPIO_INTR_HIGH_LEVEL);
+}
+
+void printMain () {
+  display.clearDisplay();
+  display.setTextSize(2.0);
+  display.println("LOCKED");
+  display.setTextSize(1.8);
+  display.setCursor((20 - len) / 2, row++);
+  display.print("Lock date:");
+  display.print(digitalClockDisplay);
+  display.print ("         ");
+  value = analogRead(10);
+  voltage = value * 5.0/1023;
+  perc = map(voltage, 3.6, 4.2, 0, 100);
+  Serial.print("Battery level: ");
+  Serial.print(perc);
+  Serial.println(" %");
+  display.setCursor((20 - len) / 2, row++);
+  display.print (Name);
+  display.display();
+  delay(10000); }
+}
